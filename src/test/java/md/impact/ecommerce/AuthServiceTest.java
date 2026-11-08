@@ -1,0 +1,138 @@
+package md.impact.ecommerce;
+
+import md.impact.ecommerce.dtos.AuthResponse;
+import md.impact.ecommerce.dtos.LoginRequest;
+import md.impact.ecommerce.dtos.MeResponse;
+import md.impact.ecommerce.dtos.RegisterRequest;
+import md.impact.ecommerce.entities.Role;
+import md.impact.ecommerce.entities.User;
+import md.impact.ecommerce.exceptions.ApiException;
+import md.impact.ecommerce.repositories.UserRepository;
+import md.impact.ecommerce.security.JwtService;
+import md.impact.ecommerce.services.AuthService;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.*;
+
+@ExtendWith(MockitoExtension.class)
+public class AuthServiceTest {
+
+    @Mock
+    UserRepository userRepository;
+
+    @Mock
+    PasswordEncoder passwordEncoder;
+
+    @Mock
+    JwtService jwtService;
+
+    AuthService authService;
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUp(){
+        authService = new AuthService(userRepository,
+                passwordEncoder, jwtService);
+    }
+
+    @Test
+    void register_hashes_password_before_saving(){
+        var req = new RegisterRequest("elev@impact.md",
+                "password_for_elev_user");
+
+        when(userRepository.existsByEmail(req.email())).thenReturn(false);
+        when(passwordEncoder.encode(req.password())).thenReturn(
+                "$2$b10$hash-false-only-for-test");
+        when(userRepository.save(any(User.class))).thenAnswer(
+                invocation -> invocation.getArgument(0));
+        when(jwtService.generate(any(User.class))).thenReturn("jwt_example");
+
+        AuthResponse response = authService.register(req);
+
+        ArgumentCaptor<User> captor = ArgumentCaptor.forClass(User.class);
+
+        verify(userRepository).save(captor.capture());
+        assertThat(captor.getValue().getPasswordHash()).isEqualTo(
+                "$2$b10$hash-false-only-for-test");
+        assertThat(captor.getValue().getPasswordHash()).isNotEqualTo(req.password());
+
+
+        assertThat(response.email()).isEqualTo("elev@impact.md");//req.email()
+        assertThat(response.token()).isEqualTo("jwt_example");
+        assertThat(response.role()).isEqualTo("USER");
+
+    }
+
+    @Test
+    void register_rejects_an_email_that_already_exists(){
+        var req = new RegisterRequest("already@impact.md", "example_password");
+
+        when(userRepository.existsByEmail(req.email())).thenReturn(true);
+
+        assertThatThrownBy(()-> authService.register(req))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> ((ApiException) e).getStatus())
+                .isEqualTo(HttpStatus.CONFLICT);
+
+        verify(userRepository, never()).save(any());
+    }
+
+    @Test
+    void login_with_correct_password_returns_a_token(){
+        var req = new RegisterRequest("user123@impact.md", "user_password");
+
+        User user = mock(User.class);
+        when(user.getEmail()).thenReturn(req.email());
+        when(user.getPasswordHash()).thenReturn("hash_password_saved");
+        when(user.getRole()).thenReturn(Role.USER);
+        when(userRepository.findByEmail(req.email())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(req.password(), "hash_password_saved"))
+                .thenReturn(true);
+        when(jwtService.generate(user)).thenReturn("false_jwt_for_test");
+
+        AuthResponse response = authService.register(req);
+
+        assertThat(response.token()).isEqualTo("false_jwt_for_test");
+        assertThat(response.role()).isEqualTo("USER");
+    }
+
+    @Test
+    void login_with_wrong_password_is_rejected_without_leaking_wrong_field(){
+var req = new LoginRequest("user123@impact.md", "wrong_user_password");
+        User user = mock(User.class);
+
+        when(user.getPasswordHash()).thenReturn("hash-saved");
+        when(userRepository.findByEmail(req.email())).thenReturn(Optional.of(user));
+        when(passwordEncoder.matches(req.password(), "hash-saved"))
+                .thenReturn(false);
+
+        assertThatThrownBy(() ->
+                authService.login(req))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> (ApiException) e)
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+
+        verifyNoInteractions(jwtService);
+
+
+
+    }
+
+
+
+
+
+
+
+}
