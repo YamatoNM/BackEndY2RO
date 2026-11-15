@@ -125,8 +125,32 @@ var req = new LoginRequest("user123@impact.md", "wrong_user_password");
 
         verifyNoInteractions(jwtService);
 
+    }
+    @Test
+    void login_with_unknown_email_gives_same_error_as_wrong_password(){
+        when(userRepository.findByEmail("unknownemail@impact.md")).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() ->
+                authService.login(new LoginRequest("unknownemail@impact.md",
+                        "anypassword")))
+                .isInstanceOf(ApiException.class)
+                .extracting(e -> (ApiException) e)
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
 
 
+    }
+    @Test
+    void me_returns_the_typed_repository_for_the_authenticated_email(){
+        User user = mock(User.class);
+        //when(userRepository.findByEmail(anyString())).thenReturn(Optional.empty())
+        when(user.getEmail()).thenReturn("admin@impact.md");
+
+        when(user.getRole()).thenReturn(Role.ADMIN);
+        when(userRepository.findByEmail("admin@impact.md")).thenReturn(Optional.of(user));
+
+        MeResponse response = authService.me("admin@impact.md");
+
+        assertThat(response).isEqualTo(new MeResponse("admin@impact.md", "ADMIN"));
     }
 
 
